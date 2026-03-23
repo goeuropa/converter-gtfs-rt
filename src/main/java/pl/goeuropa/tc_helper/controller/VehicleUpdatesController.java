@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import pl.goeuropa.tc_helper.model.Assignment;
+import pl.goeuropa.tc_helper.model.dto.ApiResponseDto;
 import pl.goeuropa.tc_helper.model.dto.AssignmentDto;
 import pl.goeuropa.tc_helper.service.VehicleUpdatesService;
 
@@ -15,12 +16,13 @@ import java.util.regex.Pattern;
 @Slf4j
 @Validated
 @RestController
+@RequestMapping("/api/v1")
 @RequiredArgsConstructor
 public class VehicleUpdatesController {
 
     private final VehicleUpdatesService service;
 
-    @GetMapping("/api/v1/vehicles/positions")
+    @GetMapping("/vehicles/positions")
     public String getPositionsByAgency(@RequestParam("agency") String agency) {
         String asText = service.getVehiclePositions(agency);
         log.info("Get feed message include {} lines", asText.lines()
@@ -28,27 +30,44 @@ public class VehicleUpdatesController {
         return asText;
     }
 
-    @PostMapping("/api/v1/vehicles")
-    public String putAllAssignments(
-            @RequestBody AssignmentDto assignments,
-            @RequestParam("to") String to) {
-        try {
-            if (to.equals("blockAssignments")) return service.addAllAssignments(assignments);
-            log.info("Receive {} assignments with key {}", assignments.getAssignmentsList().size(), assignments.getKey());
-        } catch (Exception e) {
-            log.error(e.getMessage());
-            return e.getMessage();
-        }
-        throw new IllegalArgumentException("Check URI or body JSON what you sent");
-    }
-
-    @GetMapping("/api/v1/vehicles/assignments")
+    @GetMapping("/vehicles/assignments")
     public List<Assignment> getAssignmentsByAgency(@RequestParam("agency") String agency) {
         log.info("Get assignments for agency {}", agency);
         return service.getAssignmentsByAgency(agency);
     }
 
-    @PostMapping("/api/v1/vehicles/assignments")
+    @PostMapping("/vehicles")
+    public ApiResponseDto putAllAssignments(
+            @RequestBody AssignmentDto assignments,
+            @RequestParam("to") String to) {
+        try {
+            if (to.equals("blockAssignments")) {
+                var result = service.addAllAssignments(assignments);
+                log.info("Receive {} assignments with key {}", assignments.getAssignmentsList().size(), assignments.getKey());
+                return new ApiResponseDto(true, result);
+            }
+        } catch (Exception e) {
+            log.error(e.getMessage());
+            return new ApiResponseDto(false, e.getMessage());
+        }
+        throw new IllegalArgumentException("Check URI or JSON-body that you sent");
+    }
+
+    @PostMapping("/key/{key}/agency/{agency}/command/vehiclesToBlockAssignments")
+    public ApiResponseDto putAllAssignmentsForVeritum(
+            @RequestBody AssignmentDto assignments,
+            @PathVariable String key, @PathVariable String agency) {
+        try {
+            var result = service.addAllAssignments(assignments);
+            log.info("Receive {} assignments with key {}", assignments.getAssignmentsList().size(), assignments.getKey());
+            return new ApiResponseDto(true, result);
+        } catch (Exception e) {
+            log.error(e.getMessage());
+            return new ApiResponseDto(false, e.getMessage());
+        }
+    }
+
+    @PostMapping("/vehicles/assignments")
     public String manualRetryToSendAssignments(@RequestBody String agency) {
         try {
             String regex = ":\\s*\"([^\"]+)";
@@ -61,6 +80,6 @@ public class VehicleUpdatesController {
             log.error(e.getMessage());
             return e.getMessage();
         }
-        throw new IllegalArgumentException("Check body JSON what you sent");
+        throw new IllegalArgumentException("Check JSON-body that you set");
     }
 }

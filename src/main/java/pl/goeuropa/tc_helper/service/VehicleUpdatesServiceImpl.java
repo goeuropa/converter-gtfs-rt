@@ -12,7 +12,9 @@ import pl.goeuropa.tc_helper.model.dto.AssignmentDto;
 import pl.goeuropa.tc_helper.repository.VehicleRepository;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -107,6 +109,9 @@ public class VehicleUpdatesServiceImpl implements VehicleUpdatesService {
         } catch (Exception ex) {
             log.error(ex.getMessage());
         }
-        return String.format("Added %d assignments to repository", amount);
+        Map<String, Boolean> result = new HashMap<>();
+        vehicleRepository.getAssignments().get(KEY).getAssignmentsList()
+                .forEach(assignment -> result.put(assignment.getVehicleId(), true));
+        return result.toString();
     }
 }
