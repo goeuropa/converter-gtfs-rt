@@ -1,14 +1,16 @@
 package pl.goeuropa.tc_helper.service;
 
 import com.google.transit.realtime.GtfsRealtime;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import pl.goeuropa.tc_helper.client.TransitclockClient;
 import pl.goeuropa.tc_helper.configs.ApiProperties;
 import pl.goeuropa.tc_helper.gtfsrt.GtfsRealTimeVehicleFeed;
 import pl.goeuropa.tc_helper.model.Assignment;
 import pl.goeuropa.tc_helper.model.dto.AssignmentDto;
+import pl.goeuropa.tc_helper.model.dto.VehiclesDto;
 import pl.goeuropa.tc_helper.repository.VehicleRepository;
 
 import java.util.Collections;
@@ -20,13 +22,22 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class VehicleUpdatesServiceImpl implements VehicleUpdatesService {
 
     private static String KEY;
     private final VehicleRepository vehicleRepository = VehicleRepository.getInstance();
     private final TransitclockClient tcClient;
     private final ApiProperties properties;
+    private final TaskExecutor fanOutExecutor;
+
+    public VehicleUpdatesServiceImpl(
+            TransitclockClient tcClient,
+            ApiProperties properties,
+            @Qualifier("assignmentFanOutExecutor") TaskExecutor fanOutExecutor) {
+        this.tcClient = tcClient;
+        this.properties = properties;
+        this.fanOutExecutor = fanOutExecutor;
+    }
 
     @Override
     public String getVehiclePositions(String department) {
@@ -56,12 +67,16 @@ public class VehicleUpdatesServiceImpl implements VehicleUpdatesService {
     @Override
     public String sendAssignmentsToAgency(String agency) {
         var list = vehicleRepository.getSegregatedAssignments().get(agency);
+        var url = properties.getTcBaseUrls().get(agency);
+        if (list == null || url == null) {
+            log.warn("No data for agency '{}' (assignments={}, tcBaseUrl={})", agency, list, url);
+            return "No data for agency: " + agency;
+        }
         var key = "";
-            String regex = "key\\s*/([^/]+)";
-            var url = properties.getTcBaseUrls().get(agency);
-            Matcher matcher = Pattern.compile(regex).matcher(url);
-            if (matcher.find()) {
-                key = matcher.group(1);
+        String regex = "key\\s*/([^/]+)";
+        Matcher matcher = Pattern.compile(regex).matcher(url);
+        if (matcher.find()) {
+            key = matcher.group(1);
         }
         log.info("{} assignments send to agency '{}'", list.size(), agency.toUpperCase());
         return tcClient.sendAssignments(agency, new AssignmentDto(key, list));
@@ -79,33 +94,30 @@ public class VehicleUpdatesServiceImpl implements VehicleUpdatesService {
 
             log.info("Added {} assignments to repository.", amount);
 
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-
+            final String currentKey = KEY;
+            fanOutExecutor.execute(() -> {
+                try {
                     for (String agency : properties.getTcBaseUrls().keySet()) {
-
+                        VehiclesDto vehicles = vehicleRepository.getVehiclesList().get(agency);
+                        if (vehicles == null || vehicles.getList() == null) {
+                            log.warn("No polled vehicles for agency '{}', skipping fan-out.", agency);
+                            continue;
+                        }
                         var list = assignmentsList.stream()
-                                .filter(assignment -> {
-                                    return vehicleRepository.getVehiclesList()
-                                            .get(agency)
-                                            .getList()
-                                            .stream()
-                                            .anyMatch(vehicle -> vehicle.get("number")
-                                                    .equals(assignment.getVehicleId()
-                                                    ));
-                                }).toList();
+                                .filter(assignment -> vehicles.getList().stream()
+                                        .anyMatch(vehicle -> vehicle.get("number")
+                                                .equals(assignment.getVehicleId())))
+                                .toList();
                         if (list.isEmpty()) continue;
                         vehicleRepository.getSegregatedAssignments().put(agency, list);
 
-                        log.info("Segregated {} assignments for agency: {}",
-                                list.size(),
-                                agency
-                        );
-                        tcClient.sendAssignments(agency, new AssignmentDto(KEY, list));
+                        log.info("Segregated {} assignments for agency: {}", list.size(), agency);
+                        tcClient.sendAssignments(agency, new AssignmentDto(currentKey, list));
                     }
+                } catch (Exception ex) {
+                    log.error("Fan-out failed: {}", ex.getMessage(), ex);
                 }
-            }).start();
+            });
         } catch (Exception ex) {
             log.error(ex.getMessage());
         }

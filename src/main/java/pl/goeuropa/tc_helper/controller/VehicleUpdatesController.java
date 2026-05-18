@@ -38,19 +38,16 @@ public class VehicleUpdatesController {
 
     @PostMapping("/vehicles")
     public ApiResponseDto putAllAssignments(
-            @RequestBody AssignmentDto assignments,
-            @RequestParam("to") String to) {
+            @RequestBody AssignmentDto assignments) {
         try {
-            if (to.equals("blockAssignments")) {
-                var result = service.addAllAssignments(assignments);
-                log.info("Receive {} assignments with key {}", assignments.getAssignmentsList().size(), assignments.getKey());
-                return new ApiResponseDto(true, result);
-            }
+            var result = service.addAllAssignments(assignments);
+            log.info("Receive {} assignments with key {}", assignments.getAssignmentsList().size(), assignments.getKey());
+            return new ApiResponseDto(true, result);
+
         } catch (Exception e) {
             log.error(e.getMessage());
             return new ApiResponseDto(false, e.getMessage());
         }
-        throw new IllegalArgumentException("Check URI or JSON-body that you sent");
     }
 
     @PostMapping("/key/{key}/agency/{agency}/command/vehiclesToBlockAssignments")

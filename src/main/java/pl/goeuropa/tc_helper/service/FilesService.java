@@ -13,11 +13,11 @@ import pl.goeuropa.tc_helper.model.Assignment;
 import pl.goeuropa.tc_helper.repository.VehicleRepository;
 
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -54,26 +54,25 @@ public class FilesService {
 
     @PostConstruct
     public void getFromBackupFile() {
-        Map<String, List<Assignment>> probablyJavaData;
-        try {
-            var dataFromFile = new FileInputStream(FILE_PATH);
-            var objectFromFile = new ObjectInputStream(dataFromFile);
+        try (FileInputStream fileInput = new FileInputStream(FILE_PATH);
+             ObjectInputStream objectInput = new ObjectInputStream(fileInput)) {
 
-            if (objectFromFile == null) return;
-
-                probablyJavaData = (ConcurrentHashMap<String, List<Assignment>>) objectFromFile.readObject();
-                if (probablyJavaData != null && probablyJavaData instanceof Map) {
-                    vehicleRepository.setSegregatedAssignments((
-                            ConcurrentHashMap<String, List<Assignment>>) probablyJavaData);
-
-                    log.info("{} - assignments from file is added to repository.",
-                            probablyJavaData.values().stream()
-                                    .mapToInt(List::size)
-                                    .sum());
-                }
-            objectFromFile.close();
+            Object raw = objectInput.readObject();
+            if (raw instanceof ConcurrentHashMap<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                ConcurrentHashMap<String, List<Assignment>> restored =
+                        (ConcurrentHashMap<String, List<Assignment>>) map;
+                vehicleRepository.setSegregatedAssignments(restored);
+                log.info("{} - assignments from file is added to repository.",
+                        restored.values().stream().mapToInt(List::size).sum());
+            } else {
+                log.warn("Backup file {} did not contain a ConcurrentHashMap (was {}), ignoring.",
+                        FILE_PATH, raw == null ? "null" : raw.getClass().getName());
+            }
+        } catch (FileNotFoundException e) {
+            log.info("Backup file {} not found, starting fresh.", FILE_PATH);
         } catch (Exception e) {
-            log.error(e.getMessage());
+            log.error("Failed to load backup file {}: {}", FILE_PATH, e.getMessage());
         }
     }
 
